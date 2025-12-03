@@ -15,16 +15,14 @@
           <q-circular-progress
             :value="progressValue"
             size="220px"
-            thickness="0.2"
+            :thickness="0.2"
             color="primary"
             track-color="grey-4"
             show-value
           >
             <div class="text-h3 text-weight-bolder">{{ formattedTime }}</div>
           </q-circular-progress>
-          <div class="text-caption text-grey-7">
-            Duração configurada: {{ durationMinutes }} min
-          </div>
+          <div class="text-caption text-grey-7">Duração configurada: {{ durationMinutes }} min</div>
           <div class="text-caption text-primary">
             {{ statusLabel }}
           </div>
@@ -111,7 +109,11 @@
             O navegador não suporta notificações do sistema. Usaremos apenas o alerta do app.
           </q-banner>
 
-          <q-banner v-else-if="needsNotificationPermission" class="bg-grey-2 text-grey-9" inline-actions>
+          <q-banner
+            v-else-if="needsNotificationPermission"
+            class="bg-grey-2 text-grey-9"
+            inline-actions
+          >
             <template #avatar>
               <q-icon name="notifications_active" color="primary" />
             </template>
@@ -154,9 +156,7 @@ const timerId = ref<number | null>(null);
 const permissionStatus = ref<NotificationPermission>('default');
 const $q = useQuasar();
 
-const durationRules = [
-  (val: number) => (val && val > 0) || 'Use pelo menos 1 minuto',
-];
+const durationRules = [(val: number) => (val && val > 0) || 'Use pelo menos 1 minuto'];
 
 const totalMs = computed(() => Math.max(1, durationMinutes.value * 60 * 1000));
 
@@ -186,7 +186,7 @@ const statusLabel = computed(() => {
 
 const hasNotificationSupport = computed(() => typeof Notification !== 'undefined');
 const needsNotificationPermission = computed(
-  () => hasNotificationSupport.value && permissionStatus.value !== 'granted'
+  () => hasNotificationSupport.value && permissionStatus.value !== 'granted',
 );
 
 watch(
@@ -197,7 +197,7 @@ watch(
       remainingMs.value = Math.max(1, val * 60 * 1000);
     }
   },
-  { flush: 'sync' }
+  { flush: 'sync' },
 );
 
 onMounted(() => {
