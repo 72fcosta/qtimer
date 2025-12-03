@@ -154,6 +154,14 @@ const remainingMs = ref(defaultMinutes * 60 * 1000);
 const cycleEndAt = ref<number | null>(null);
 const timerId = ref<number | null>(null);
 const permissionStatus = ref<NotificationPermission>('default');
+const reminderSuggestions = [
+  'Levante-se por 2 minutos',
+  'Alongue pescoço e ombros',
+  'Beba um copo de água',
+  'Olhe para longe para descansar os olhos',
+  'Faça 10 respirações profundas',
+  'Dê uma volta rápida pela casa',
+];
 const $q = useQuasar();
 
 const durationRules = [(val: number) => (val && val > 0) || 'Use pelo menos 1 minuto'];
@@ -300,11 +308,15 @@ function finishCycle() {
 }
 
 async function sendReminder() {
+  const suggestion = pickSuggestion();
+
   $q.notify({
     type: 'positive',
-    message: 'Ciclo encerrado! Hora do lembrete.',
-    caption: 'Você pode iniciar um novo ciclo quando quiser.',
-    timeout: 4000,
+    message: 'Ciclo encerrado!',
+    caption: `Sugestão rápida: ${suggestion}`,
+    timeout: 6000,
+    position: 'top-right',
+    progress: true,
   });
 
   if (!hasNotificationSupport.value) {
@@ -320,8 +332,9 @@ async function sendReminder() {
 
   if (permission === 'granted') {
     new Notification('Tempo encerrado', {
-      body: 'Seu ciclo configurado terminou. Hora do próximo passo!',
+      body: `Seu ciclo terminou. ${suggestion}`,
       tag: 'qtimer-cycle',
+      silent: true,
     });
   }
 }
@@ -351,5 +364,10 @@ async function requestNotificationPermission() {
       caption: 'Habilite-as no navegador para receber lembretes.',
     });
   }
+}
+
+function pickSuggestion() {
+  const index = Math.floor(Math.random() * reminderSuggestions.length);
+  return reminderSuggestions[index] || reminderSuggestions[0];
 }
 </script>
