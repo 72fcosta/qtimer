@@ -22,7 +22,9 @@
           >
             <div class="text-h3 text-weight-bolder">{{ formattedTime }}</div>
           </q-circular-progress>
-          <div class="text-caption text-grey-7">Duração configurada: {{ durationMinutes }} min</div>
+          <div class="text-caption text-grey-7">
+            Ciclo: {{ cycleMinutes }} min · Descanso: {{ restMinutes }} min
+          </div>
           <div class="text-caption text-primary">
             {{ statusLabel }}
           </div>
@@ -32,14 +34,14 @@
 
         <q-card-section class="q-gutter-md">
           <q-input
-            v-model.number="durationMinutes"
+            v-model.number="cycleMinutes"
             type="number"
             label="Duração do ciclo (minutos)"
             outlined
             dense
             :disable="isRunning"
             :rules="durationRules"
-            @blur="normalizeDuration"
+            @blur="normalizeCycleDuration"
           >
             <template #prepend>
               <q-icon name="schedule" />
@@ -49,23 +51,63 @@
                 flat
                 dense
                 icon="restart_alt"
-                :disable="isRunning || durationMinutes === defaultMinutes"
-                @click="resetDuration"
+                :disable="isRunning || cycleMinutes === defaultCycleMinutes"
+                @click="resetCycleDuration"
               >
-                <q-tooltip>Voltar para {{ defaultMinutes }} min</q-tooltip>
+                <q-tooltip>Voltar para {{ defaultCycleMinutes }} min</q-tooltip>
               </q-btn>
             </template>
           </q-input>
 
           <div class="row no-wrap items-center q-gutter-sm">
             <q-chip
-              v-for="quick in quickDurations"
+              v-for="quick in quickCycleDurations"
               :key="quick"
               clickable
               outline
               color="primary"
               :disable="isRunning"
-              @click="applyQuickDuration(quick)"
+              @click="applyQuickCycleDuration(quick)"
+            >
+              {{ quick }} min
+            </q-chip>
+          </div>
+
+          <q-input
+            v-model.number="restMinutes"
+            type="number"
+            label="Duração do descanso (minutos)"
+            outlined
+            dense
+            :disable="isRunning"
+            :rules="durationRules"
+            @blur="normalizeRestDuration"
+          >
+            <template #prepend>
+              <q-icon name="self_improvement" />
+            </template>
+            <template #append>
+              <q-btn
+                flat
+                dense
+                icon="restart_alt"
+                :disable="isRunning || restMinutes === defaultRestMinutes"
+                @click="resetRestDuration"
+              >
+                <q-tooltip>Voltar para {{ defaultRestMinutes }} min</q-tooltip>
+              </q-btn>
+            </template>
+          </q-input>
+
+          <div class="row no-wrap items-center q-gutter-sm">
+            <q-chip
+              v-for="quick in quickRestDurations"
+              :key="quick"
+              clickable
+              outline
+              color="secondary"
+              :disable="isRunning"
+              @click="applyQuickRestDuration(quick)"
             >
               {{ quick }} min
             </q-chip>
@@ -77,11 +119,11 @@
         <q-card-actions align="center" class="q-gutter-sm">
           <q-btn
             color="primary"
-            label="Iniciar"
+            label="Iniciar ciclo"
             unelevated
             icon="play_arrow"
-            :disable="isRunning || durationMinutes < 1"
-            @click="startTimer"
+            :disable="isRunning || cycleMinutes < 1"
+            @click="startCycleTimer"
           />
           <q-btn
             color="secondary"
@@ -98,6 +140,14 @@
             icon="restart_alt"
             :disable="isRunning && remainingMs > 0"
             @click="resetTimer"
+          />
+          <q-btn
+            dense
+            flat
+            color="dark"
+            icon="widgets"
+            :label="showWidget ? 'Ocultar widget' : 'Mostrar widget'"
+            @click="toggleWidget"
           />
         </q-card-actions>
 
@@ -129,29 +179,55 @@
             </template>
           </q-banner>
 
-          <q-banner v-else class="bg-positive text-white">
-            <template #avatar>
-              <q-icon name="notifications" />
-            </template>
-            Notificações ativas. Você receberá um lembrete ao fim de cada ciclo.
+      <q-banner v-else class="bg-positive text-white">
+        <template #avatar>
+          <q-icon name="notifications" />
+        </template>
+        Notificações ativas. Você receberá um lembrete ao fim de cada ciclo.
           </q-banner>
         </q-card-section>
       </q-card>
+      <div v-if="showWidget" class="widget-panel" :style="widgetStyle" @mousedown.stop>
+        <q-card flat bordered class="bg-white shadow-4">
+          <q-card-section
+            class="row items-center justify-between widget-drag-handle text-grey-7"
+            @mousedown.prevent.stop="startDragging"
+          >
+            <div class="row items-center q-gutter-xs">
+              <q-icon name="open_with" size="16px" />
+              <span class="text-caption">Widget</span>
+            </div>
+            <q-btn flat dense round icon="close" size="sm" @click.stop="toggleWidget" />
+          </q-card-section>
+          <q-separator />
+          <q-card-section class="q-pa-md">
+            <div class="text-overline text-primary">{{ phaseLabel }}</div>
+            <div class="text-h5 text-weight-bold">{{ formattedTime }}</div>
+            <div class="text-caption text-grey-7">Estado: {{ widgetStateLabel }}</div>
+          </q-card-section>
+        </q-card>
+      </div>
     </div>
   </q-page>
 </template>
 
 <script setup lang="ts">
 import { useQuasar } from 'quasar';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 
-const defaultMinutes = 30;
-const durationMinutes = ref(defaultMinutes);
-const quickDurations = [15, 25, 30, 45, 60];
+type Phase = 'cycle' | 'rest';
+
+const defaultCycleMinutes = 30;
+const defaultRestMinutes = 5;
+const cycleMinutes = ref(defaultCycleMinutes);
+const restMinutes = ref(defaultRestMinutes);
+const quickCycleDurations = [15, 25, 30, 45, 60];
+const quickRestDurations = [5, 10, 15];
+const phase = ref<Phase>('cycle');
+const lastCompletedPhase = ref<Phase | null>(null);
 const isRunning = ref(false);
-const hasFinished = ref(false);
-const remainingMs = ref(defaultMinutes * 60 * 1000);
-const cycleEndAt = ref<number | null>(null);
+const remainingMs = ref(defaultCycleMinutes * 60 * 1000);
+const phaseEndAt = ref<number | null>(null);
 const timerId = ref<number | null>(null);
 const permissionStatus = ref<NotificationPermission>('default');
 const reminderSuggestions = [
@@ -163,10 +239,21 @@ const reminderSuggestions = [
   'Dê uma volta rápida pela casa',
 ];
 const $q = useQuasar();
+const showWidget = ref(false);
+const widgetPosition = reactive({ x: 24, y: 24 });
+const dragState = reactive({ active: false, offsetX: 0, offsetY: 0 });
 
 const durationRules = [(val: number) => (val && val > 0) || 'Use pelo menos 1 minuto'];
 
-const totalMs = computed(() => Math.max(1, durationMinutes.value * 60 * 1000));
+const activeMinutes = computed(() =>
+  phase.value === 'cycle' ? cycleMinutes.value : restMinutes.value,
+);
+
+const totalMs = computed(() => Math.max(1, activeMinutes.value * 60 * 1000));
+
+const widgetStyle = computed(() => ({
+  transform: `translate(${widgetPosition.x}px, ${widgetPosition.y}px)`,
+}));
 
 const progressValue = computed(() => {
   const remaining = Math.min(remainingMs.value, totalMs.value);
@@ -184,13 +271,28 @@ const formattedTime = computed(() => {
 
 const statusLabel = computed(() => {
   if (isRunning.value) {
-    return 'Contando ciclo em andamento';
+    return phase.value === 'cycle' ? 'Ciclo em andamento' : 'Descanso em andamento';
   }
-  if (hasFinished.value) {
-    return 'Ciclo concluído. Ajuste e inicie o próximo quando quiser.';
+  if (lastCompletedPhase.value === 'rest') {
+    return 'Descanso concluído. Inicie um novo ciclo quando quiser.';
+  }
+  if (lastCompletedPhase.value === 'cycle') {
+    return 'Ciclo concluído. Descanso iniciado automaticamente.';
   }
   return 'Pronto para iniciar um novo ciclo';
 });
+
+const widgetStateLabel = computed(() => {
+  if (phase.value === 'rest' && isRunning.value) {
+    return 'Descansando';
+  }
+  if (isRunning.value) {
+    return 'Rodando';
+  }
+  return 'Pausado';
+});
+
+const phaseLabel = computed(() => (phase.value === 'cycle' ? 'Ciclo' : 'Descanso'));
 
 const hasNotificationSupport = computed(() => typeof Notification !== 'undefined');
 const needsNotificationPermission = computed(
@@ -198,11 +300,24 @@ const needsNotificationPermission = computed(
 );
 
 watch(
-  durationMinutes,
+  cycleMinutes,
   (val, oldVal) => {
     const previousTotal = Math.max(1, oldVal * 60 * 1000);
-    if (!isRunning.value && remainingMs.value === previousTotal) {
+    if (!isRunning.value && phase.value === 'cycle' && remainingMs.value === previousTotal) {
       remainingMs.value = Math.max(1, val * 60 * 1000);
+      lastCompletedPhase.value = null;
+    }
+  },
+  { flush: 'sync' },
+);
+
+watch(
+  restMinutes,
+  (val, oldVal) => {
+    const previousTotal = Math.max(1, oldVal * 60 * 1000);
+    if (!isRunning.value && phase.value === 'rest' && remainingMs.value === previousTotal) {
+      remainingMs.value = Math.max(1, val * 60 * 1000);
+      lastCompletedPhase.value = null;
     }
   },
   { flush: 'sync' },
@@ -212,47 +327,80 @@ onMounted(() => {
   if (hasNotificationSupport.value) {
     permissionStatus.value = Notification.permission;
   }
+
+  window.addEventListener('mousemove', handleDrag);
+  window.addEventListener('mouseup', stopDragging);
+  setInitialWidgetPosition();
 });
 
-onBeforeUnmount(stopTimer);
+onBeforeUnmount(() => {
+  stopTimer();
+  window.removeEventListener('mousemove', handleDrag);
+  window.removeEventListener('mouseup', stopDragging);
+});
 
-function normalizeDuration() {
-  if (!durationMinutes.value || durationMinutes.value < 1) {
-    durationMinutes.value = 1;
+function normalizeCycleDuration() {
+  if (!cycleMinutes.value || cycleMinutes.value < 1) {
+    cycleMinutes.value = 1;
   }
 }
 
-function resetDuration() {
-  durationMinutes.value = defaultMinutes;
-  if (!isRunning.value) {
-    remainingMs.value = defaultMinutes * 60 * 1000;
-    hasFinished.value = false;
+function normalizeRestDuration() {
+  if (!restMinutes.value || restMinutes.value < 1) {
+    restMinutes.value = 1;
   }
 }
 
-function applyQuickDuration(minutes: number) {
-  durationMinutes.value = minutes;
-  if (!isRunning.value) {
+function resetCycleDuration() {
+  cycleMinutes.value = defaultCycleMinutes;
+  if (!isRunning.value && phase.value === 'cycle') {
+    remainingMs.value = defaultCycleMinutes * 60 * 1000;
+    lastCompletedPhase.value = null;
+  }
+}
+
+function resetRestDuration() {
+  restMinutes.value = defaultRestMinutes;
+  if (!isRunning.value && phase.value === 'rest') {
+    remainingMs.value = defaultRestMinutes * 60 * 1000;
+    lastCompletedPhase.value = null;
+  }
+}
+
+function applyQuickCycleDuration(minutes: number) {
+  cycleMinutes.value = minutes;
+  if (!isRunning.value && phase.value === 'cycle') {
     remainingMs.value = minutes * 60 * 1000;
-    hasFinished.value = false;
+    lastCompletedPhase.value = null;
   }
 }
 
-function startTimer() {
-  if (isRunning.value) {
+function applyQuickRestDuration(minutes: number) {
+  restMinutes.value = minutes;
+  if (!isRunning.value && phase.value === 'rest') {
+    remainingMs.value = minutes * 60 * 1000;
+    lastCompletedPhase.value = null;
+  }
+}
+
+function startCycleTimer() {
+  if (isRunning.value && phase.value === 'cycle') {
     return;
   }
 
-  normalizeDuration();
+  const previousPhase = phase.value;
+  phase.value = 'cycle';
+  normalizeCycleDuration();
 
-  if (remainingMs.value <= 0 || hasFinished.value) {
-    remainingMs.value = totalMs.value;
-    hasFinished.value = false;
+  const total = Math.max(1, cycleMinutes.value * 60 * 1000);
+  if (previousPhase !== 'cycle' || remainingMs.value <= 0) {
+    remainingMs.value = total;
   }
 
+  lastCompletedPhase.value = null;
   isRunning.value = true;
   const now = Date.now();
-  cycleEndAt.value = now + remainingMs.value;
+  phaseEndAt.value = now + remainingMs.value;
   timerId.value = window.setInterval(tick, 200);
 }
 
@@ -266,48 +414,62 @@ function pauseTimer() {
 
 function resetTimer() {
   stopTimer();
-  remainingMs.value = totalMs.value;
-  hasFinished.value = false;
+  phase.value = 'cycle';
+  normalizeCycleDuration();
+  remainingMs.value = Math.max(1, cycleMinutes.value * 60 * 1000);
+  lastCompletedPhase.value = null;
+}
+
+function toggleWidget() {
+  showWidget.value = !showWidget.value;
+  if (showWidget.value) {
+    setInitialWidgetPosition();
+  }
 }
 
 function tick() {
-  if (!cycleEndAt.value) {
+  if (!phaseEndAt.value) {
     return;
   }
 
-  const msLeft = cycleEndAt.value - Date.now();
+  const msLeft = phaseEndAt.value - Date.now();
   remainingMs.value = Math.max(0, msLeft);
 
   if (msLeft <= 0) {
-    finishCycle();
+    finishPhase();
   }
 }
 
 function updateRemainingFromNow() {
-  if (!cycleEndAt.value) {
+  if (!phaseEndAt.value) {
     return;
   }
-  const msLeft = Math.max(0, cycleEndAt.value - Date.now());
+  const msLeft = Math.max(0, phaseEndAt.value - Date.now());
   remainingMs.value = msLeft;
 }
 
 function stopTimer() {
   isRunning.value = false;
-  cycleEndAt.value = null;
+  phaseEndAt.value = null;
   if (timerId.value !== null) {
     clearInterval(timerId.value);
     timerId.value = null;
   }
 }
 
-function finishCycle() {
+function finishPhase() {
   stopTimer();
   remainingMs.value = 0;
-  hasFinished.value = true;
-  void sendReminder();
+  lastCompletedPhase.value = phase.value;
+
+  if (phase.value === 'cycle') {
+    void sendReminderThenStartRest();
+  } else {
+    handleRestFinished();
+  }
 }
 
-async function sendReminder() {
+async function sendReminderThenStartRest() {
   const suggestion = pickSuggestion();
 
   $q.notify({
@@ -319,24 +481,97 @@ async function sendReminder() {
     progress: true,
   });
 
-  if (!hasNotificationSupport.value) {
+  startRestTimer();
+
+  if (hasNotificationSupport.value) {
+    const permission =
+      permissionStatus.value === 'default'
+        ? await Notification.requestPermission()
+        : permissionStatus.value;
+
+    permissionStatus.value = permission;
+
+    if (permission === 'granted') {
+      new Notification('Tempo encerrado', {
+        body: `Seu ciclo terminou. ${suggestion}`,
+        tag: 'qtimer-cycle',
+        silent: true,
+      });
+    }
+  }
+}
+
+function startRestTimer() {
+  if (isRunning.value && phase.value === 'rest') {
     return;
   }
 
-  const permission =
-    permissionStatus.value === 'default'
-      ? await Notification.requestPermission()
-      : permissionStatus.value;
+  const previousPhase = phase.value;
+  phase.value = 'rest';
+  normalizeRestDuration();
 
-  permissionStatus.value = permission;
-
-  if (permission === 'granted') {
-    new Notification('Tempo encerrado', {
-      body: `Seu ciclo terminou. ${suggestion}`,
-      tag: 'qtimer-cycle',
-      silent: true,
-    });
+  const total = Math.max(1, restMinutes.value * 60 * 1000);
+  if (previousPhase !== 'rest' || remainingMs.value <= 0) {
+    remainingMs.value = total;
   }
+
+  isRunning.value = true;
+  const now = Date.now();
+  phaseEndAt.value = now + remainingMs.value;
+  timerId.value = window.setInterval(tick, 200);
+}
+
+function handleRestFinished() {
+  $q.notify({
+    type: 'info',
+    message: 'Descanso concluído',
+    caption: 'Pronto para iniciar um novo ciclo.',
+    timeout: 5000,
+    position: 'top-right',
+    progress: true,
+  });
+
+  phase.value = 'cycle';
+  normalizeCycleDuration();
+  remainingMs.value = Math.max(1, cycleMinutes.value * 60 * 1000);
+}
+
+function startDragging(event: MouseEvent) {
+  if (!showWidget.value) {
+    return;
+  }
+  dragState.active = true;
+  dragState.offsetX = event.clientX - widgetPosition.x;
+  dragState.offsetY = event.clientY - widgetPosition.y;
+}
+
+function handleDrag(event: MouseEvent) {
+  if (!dragState.active) {
+    return;
+  }
+  const newX = event.clientX - dragState.offsetX;
+  const newY = event.clientY - dragState.offsetY;
+  clampWidgetPosition(newX, newY);
+}
+
+function stopDragging() {
+  dragState.active = false;
+}
+
+function clampWidgetPosition(x: number, y: number) {
+  const padding = 8;
+  const maxX = Math.max(padding, window.innerWidth - 240 - padding);
+  const maxY = Math.max(padding, window.innerHeight - 160 - padding);
+  widgetPosition.x = Math.min(Math.max(padding, x), maxX);
+  widgetPosition.y = Math.min(Math.max(padding, y), maxY);
+}
+
+function setInitialWidgetPosition() {
+  const padding = 16;
+  const maxX = Math.max(padding, window.innerWidth - 240 - padding);
+  const maxY = Math.max(padding, window.innerHeight - 180 - padding);
+  widgetPosition.x = maxX;
+  widgetPosition.y = maxY;
 }
 
 async function requestNotificationPermission() {
@@ -371,3 +606,16 @@ function pickSuggestion() {
   return reminderSuggestions[index] || reminderSuggestions[0];
 }
 </script>
+
+<style scoped>
+.widget-panel {
+  position: fixed;
+  z-index: 2000;
+  width: 220px;
+  user-select: none;
+}
+
+.widget-drag-handle {
+  cursor: move;
+}
+</style>
