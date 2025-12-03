@@ -32,7 +32,7 @@
 
         <q-separator />
 
-        <q-card-section class="q-gutter-md">
+      <q-card-section class="q-gutter-md">
           <q-input
             v-model.number="cycleMinutes"
             type="number"
@@ -111,6 +111,15 @@
             >
               {{ quick }} min
             </q-chip>
+          </div>
+
+          <div class="row items-center q-gutter-sm q-mt-sm">
+            <q-toggle
+              v-model="ringEnabled"
+              color="primary"
+              label="Som de aviso ao finalizar"
+              left-label
+            />
           </div>
         </q-card-section>
 
@@ -242,6 +251,8 @@ const $q = useQuasar();
 const showWidget = ref(false);
 const widgetPosition = reactive({ x: 24, y: 24 });
 const dragState = reactive({ active: false, offsetX: 0, offsetY: 0 });
+const ringEnabled = ref(true);
+let audioCtx: AudioContext | null = null;
 
 const durationRules = [(val: number) => (val && val > 0) || 'Use pelo menos 1 minuto'];
 
@@ -461,6 +472,7 @@ function finishPhase() {
   stopTimer();
   remainingMs.value = 0;
   lastCompletedPhase.value = phase.value;
+  void playRing();
 
   if (phase.value === 'cycle') {
     void sendReminderThenStartRest();
@@ -572,6 +584,64 @@ function setInitialWidgetPosition() {
   const maxY = Math.max(padding, window.innerHeight - 180 - padding);
   widgetPosition.x = maxX;
   widgetPosition.y = maxY;
+}
+
+async function playRing() {
+  if (!ringEnabled.value) {
+    return;
+  }
+
+  const ctx = await getAudioContext();
+  if (!ctx) {
+    return;
+  }
+
+  const now = ctx.currentTime;
+  playTone(ctx, 880, now, 0.18);
+  playTone(ctx, 660, now + 0.25, 0.18);
+}
+
+async function getAudioContext(): Promise<AudioContext | null> {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return null;
+  }
+
+  if (!audioCtx) {
+    audioCtx = new AudioContextClass();
+  }
+
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume();
+  }
+
+  return audioCtx;
+}
+
+function playTone(ctx: AudioContext, frequency: number, start: number, duration: number) {
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  oscillator.type = 'sine';
+  oscillator.frequency.value = frequency;
+
+  const attack = 0.01;
+  const decayStart = start + duration - 0.05;
+
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(0.22, start + attack);
+  gain.gain.setValueAtTime(0.22, decayStart);
+  gain.gain.linearRampToValueAtTime(0.0001, start + duration);
+
+  oscillator.connect(gain).connect(ctx.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
 }
 
 async function requestNotificationPermission() {
