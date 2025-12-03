@@ -143,6 +143,14 @@
             @click="pauseTimer"
           />
           <q-btn
+            color="primary"
+            outline
+            label="Pular fase"
+            icon="skip_next"
+            :disable="!canSkipPhase"
+            @click="skipCurrentPhase"
+          />
+          <q-btn
             flat
             color="primary"
             label="Resetar"
@@ -261,6 +269,8 @@ const activeMinutes = computed(() =>
 );
 
 const totalMs = computed(() => Math.max(1, activeMinutes.value * 60 * 1000));
+
+const canSkipPhase = computed(() => isRunning.value || remainingMs.value < totalMs.value);
 
 const widgetStyle = computed(() => ({
   transform: `translate(${widgetPosition.x}px, ${widgetPosition.y}px)`,
@@ -429,6 +439,42 @@ function resetTimer() {
   normalizeCycleDuration();
   remainingMs.value = Math.max(1, cycleMinutes.value * 60 * 1000);
   lastCompletedPhase.value = null;
+}
+
+function skipCurrentPhase() {
+  if (!canSkipPhase.value) {
+    return;
+  }
+
+  const currentPhase = phase.value;
+  stopTimer();
+  remainingMs.value = 0;
+  lastCompletedPhase.value = null;
+
+  if (currentPhase === 'cycle') {
+    $q.notify({
+      type: 'info',
+      message: 'Ciclo pulado',
+      caption: 'Descanso iniciado.',
+      timeout: 3500,
+      position: 'top-right',
+      progress: true,
+    });
+    startRestTimer();
+    return;
+  }
+
+  $q.notify({
+    type: 'info',
+    message: 'Descanso pulado',
+    caption: 'Pronto para iniciar um novo ciclo.',
+    timeout: 3500,
+    position: 'top-right',
+    progress: true,
+  });
+  phase.value = 'cycle';
+  normalizeCycleDuration();
+  remainingMs.value = Math.max(1, cycleMinutes.value * 60 * 1000);
 }
 
 function toggleWidget() {
